@@ -206,8 +206,8 @@ AD_ANALYTICS_COLUMNS = [
     "TOTAL_CONVERSIONS", "TOTAL_CUSTOM", "TOTAL_ENGAGEMENT", "TOTAL_ENGAGEMENT_CHECKOUT",
     "TOTAL_ENGAGEMENT_CHECKOUT_VALUE_IN_MICRO_DOLLAR", "TOTAL_ENGAGEMENT_LEAD",
     "TOTAL_ENGAGEMENT_SIGNUP", "TOTAL_ENGAGEMENT_SIGNUP_VALUE_IN_MICRO_DOLLAR",
-    "TOTAL_IDEA_PIN_PRODUCT_TAG_VISIT", "TOTAL_IMPRESSION_FREQUENCY",
-    "TOTAL_IMPRESSION_USER", "TOTAL_LEAD", "TOTAL_PAGE_VISIT",
+    "TOTAL_IDEA_PIN_PRODUCT_TAG_VISIT", "TOTAL_IMPRESSION",
+    "TOTAL_LEAD", "TOTAL_PAGE_VISIT",
     "TOTAL_REPIN_RATE", "TOTAL_SIGNUP", "TOTAL_SIGNUP_VALUE_IN_MICRO_DOLLAR",
     "TOTAL_VIDEO_3SEC_VIEWS", "TOTAL_VIDEO_AVG_WATCHTIME_IN_SECOND",
     "TOTAL_VIDEO_MRC_VIEWS", "TOTAL_VIDEO_P0_COMBINED", "TOTAL_VIDEO_P100_COMPLETE",
@@ -223,6 +223,11 @@ AD_ANALYTICS_COLUMNS = [
     "WEB_CHECKOUT_COST_PER_ACTION", "WEB_CHECKOUT_ROAS"
 ]
 
+AD_ANALYTICS_REACH_COLUMNS = [
+    "TOTAL_IMPRESSION_FREQUENCY",
+    "TOTAL_IMPRESSION_USER",
+]
+
 class AdAnalyticsStream(PinterestStream):
     name = 'ad_analytics'
     parent_stream_type = AdStream
@@ -236,7 +241,7 @@ class AdAnalyticsStream(PinterestStream):
         Property("AD_ID", StringType),
         Property("DATE", DateTimeType),
     ]
-    properties += [Property(a, NumberType) for a in AD_ANALYTICS_COLUMNS]
+    properties += [Property(a, NumberType) for a in (AD_ANALYTICS_COLUMNS + AD_ANALYTICS_REACH_COLUMNS)]
     schema = PropertiesList(*properties).to_dict()
 
     def get_url_params(
@@ -287,6 +292,55 @@ class AdAnalyticsStream(PinterestStream):
             next_page_token = None
         return next_page_token
 
+TARGETING_TYPES = [
+    "KEYWORD",
+    "APPTYPE",
+    "GENDER",
+    "LOCATION",
+    "PLACEMENT",
+    "COUNTRY",
+    "TARGETED_INTEREST",
+    "PINNER_INTEREST",
+    "AUDIENCE_INCLUDE",
+    "GEO",
+    "AGE_BUCKET",
+    "REGION",
+    "QUIZ_RESULT",
+]
+
+class AdTargetingAnalyticsStream(AdAnalyticsStream):
+    name = 'ad_targeting_analytics'
+    parent_stream_type = AdStream
+    path = "ad_accounts/{ad_account_id}/ads/targeting_analytics"
+    records_jsonpath = "$.data[*]"
+    primary_keys = ["DATE", "AD_ID", "TARGETING_TYPE", "TARGETING_VALUE"]
+    replication_key = "DATE"
+    ignore_parent_replication_keys = True
+    state_partitioning_keys = ["AD_ID", "TARGETING_TYPE", "TARGETING_VALUE"]
+    properties = [
+        Property("DATE", DateTimeType),
+        Property("AD_ID", StringType),
+        Property("TARGETING_TYPE", StringType),
+        Property("TARGETING_VALUE", StringType),
+    ]
+    properties += [Property(a, NumberType) for a in AD_ANALYTICS_COLUMNS]
+    schema = PropertiesList(*properties).to_dict()
+
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any]
+    ) -> Optional[dict]:
+        params = super().get_url_params(context, next_page_token)
+        params["ad_ids"] = context["ad_id"]
+        params["targeting_types"] = ",".join(TARGETING_TYPES)
+        self.logger.debug(params)
+        return params
+
+    def post_process(self, row: dict, context: Optional[dict] = None) -> Optional[dict]:
+        transformed_row = row["metrics"]
+        transformed_row["DATE"] = datetime.datetime.strptime(transformed_row["DATE"], "%Y-%m-%d").strftime("%Y-%m-%dT%H:%M:%SZ")
+        transformed_row["TARGETING_TYPE"] = row["targeting_type"]
+        transformed_row["TARGETING_VALUE"] = row["targeting_value"]
+        return transformed_row
 
 ACCOUNT_ANALYTICS_COLUMNS = [
     "AD_GROUP_ENTITY_STATUS", "CAMPAIGN_DAILY_SPEND_CAP",
